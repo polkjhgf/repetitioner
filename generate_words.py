@@ -59,5 +59,3 @@ def check_words(original_words: str, my_words: str) -> int:
             Число:"""
     return int(query_ollama(prompt=prompt))
 
-
-print(generate_words())

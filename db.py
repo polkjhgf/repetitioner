@@ -1,7 +1,12 @@
 import sqlite3
 from typing import List, Dict
+import os
 
 DB_PATH = "repetition.db"
+
+
+def db_file_exists(path=DB_PATH):
+    return os.path.exists(path)
 
 def connection_db(path=DB_PATH):
     conn = sqlite3.connect(path)
@@ -31,9 +36,9 @@ def insert_db(conn: sqlite3.Connection, study_day: int, repetition_day: int, wor
         return c.lastrowid
 
 
-def get_db(conn: sqlite3.Connection, study_day:int) -> List[Dict]:
+def get_db(conn: sqlite3.Connection, repetition_day:int) -> List[Dict]:
     with conn:
-        c = conn.execute("""SELECT * FROM repetition WHERE study_day = ?""", (study_day,))
+        c = conn.execute("""SELECT * FROM repetition WHERE repetition_day = ?""", (repetition_day,))
         return [dict(row) for row in c.fetchall()]
 
 def remove_db(conn: sqlite3.Connection, study_day:int, repetition_day:int) -> int:
