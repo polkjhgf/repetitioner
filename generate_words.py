@@ -2,6 +2,7 @@ import requests
 import json
 import re
 import time
+import unicodedata
 
 qwen = "qwen/qwen3-4b-2507"
 gemma = "google/gemma-3-12b"
@@ -51,11 +52,80 @@ def generate_words() -> str:
     return query_ollama(prompt=prompt)
 
 
-
 def check_words(original_words: str, my_words: str) -> int:
-    prompt = f"""Сравни два списка и выведи только число — количество точных совпадений (с учётом порядка и формы слов). Ничего не добавляй.
-            Оригинал: {original_words}
-            Пользователь: {my_words}
-            Число:"""
-    return int(query_ollama(prompt=prompt))
+    """
+    Сравнение без учёта порядка.
+    Возвращает количество совпадений (целое).
+    Алгоритм: нормализация -> опц. лемматизация -> жадное fuzzy-совпадение.
+    """
+    import re, unicodedata
+    from difflib import SequenceMatcher
 
+    FUZZY_THRESHOLD = 0.80  # порог для fuzzy (0..1)
+
+    def normalize(s: str) -> str:
+        s = (s or "").strip()
+        s = unicodedata.normalize("NFKC", s)
+        s = s.lower()
+        s = re.sub(r"[^0-9a-zA-Z\u0400-\u04FF\-\s]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def split_input(s: str):
+        if not s:
+            return []
+        if "\n" in s:
+            items = [line.strip() for line in s.splitlines() if line.strip()]
+            if items:
+                return items
+        return [tok for tok in re.split(r"\s+", s.strip()) if tok]
+
+    # лемматизация, если есть
+    try:
+        import pymorphy2
+        _morph = pymorphy2.MorphAnalyzer()
+        def lemma(w: str) -> str:
+            w = normalize(w)
+            return _morph.parse(w)[0].normal_form if w else ""
+    except Exception:
+        def lemma(w: str) -> str:
+            return normalize(w)
+
+    # fuzzy функция (rapidfuzz если есть, иначе SequenceMatcher)
+    try:
+        from rapidfuzz.fuzz import ratio as rf_ratio
+        def fuzzy(a, b):
+            return rf_ratio(a, b) / 100.0
+    except Exception:
+        def fuzzy(a, b):
+            return SequenceMatcher(None, a, b).ratio()
+
+    orig_list = split_input(original_words)
+    my_list = split_input(my_words)
+
+    # подготовка списков лемм (с учётом пустых значений)
+    orig_lem = [lemma(w) for w in orig_list]
+    my_lem = [lemma(w) for w in my_list]
+
+    matched = 0
+    used = [False] * len(orig_lem)
+
+    # для каждого пользовательского слова ищем лучший ещё не использованный оригинал
+    for u in my_lem:
+        if not u:
+            continue
+        best_idx = -1
+        best_score = 0.0
+        for i, o in enumerate(orig_lem):
+            if used[i] or not o:
+                continue
+            score = 1.0 if o == u else fuzzy(o, u)
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        if best_idx >= 0 and best_score >= FUZZY_THRESHOLD:
+            used[best_idx] = True
+            matched += 1
+
+    # matched не может превышать количество оригинальных слов
+    return int(min(matched, len(orig_lem)))
